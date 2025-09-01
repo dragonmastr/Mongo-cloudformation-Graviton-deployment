@@ -1,5 +1,5 @@
-# Mongo-cloudformation-Graviton-deployment
-This repo contain an end to end cloudformation template such that it can deploy a complete mongo cluster with graviton boxes
+# Introduction
+This repo contains an end-to-end CloudFormation template such that it can deploy a complete mongo cluster with graviton boxes
 
 # Small brief about things which are used here
 - **Cloudformation**: In AWS, CloudFormation is a service that helps you model and provision your cloud resources in a declarative and automated way.
