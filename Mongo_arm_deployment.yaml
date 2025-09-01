@@ -1,0 +1,820 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MongoDB Cluster setup (Router, Config Servers, and Shards)
+Parameters:
+  InstanceTypeConfig:
+    Description: EC2 instance type
+    Type: String
+    Default: t4g.medium
+  InstanceTypeRouter:
+    Description: EC2 instance type
+    Type: String
+    Default: t4g.xlarge
+  InstanceTypeShard:
+    Description: EC2 instance type
+    Type: String
+    Default: t4g.large
+  SubnetID:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID for all MongoDB EC2 instances
+    Default: <subnet-id>
+  SecurityGroupID:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for MongoDB instances
+    Default: <sg-group>
+  AMI:
+    Type: String
+    Default: ami-0e2240e2312d76af7 #linux ami version 20
+  KeyName:
+    Description: Name of an existing EC2 KeyPair for SSH access
+    Type: String
+    Default: production
+  EBSkey:
+    Type: String
+    Default: <key>
+  Environment:
+    Type: String
+    Default: us-west-2-Oregeon-PROD
+  IamRole:
+    Type: String
+    Default: Ec2CodeDeploy #default policy 
+
+Resources:
+
+  # Mongo Router (mongos)
+  MongoRouter:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeRouter
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref IamRole
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-ROUTE"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring router Server"
+          sudo -i
+          # router essential paths 
+          mkdir -p /var/log/mongodb/
+          mkdir -p /etc/ssl/mongodb/
+          mkdir -p /etc/ssl/mongodb/backup
+          chmod 755  
+          # User permission
+          chown -R mongodb:mongodb /var/log/mongodb/
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /var/log/mongodb/
+
+  # Config Servers (Replica Set)
+  ConfigServer1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeConfig
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref IamRole
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-CONFIG-1"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Config Server"
+          #config essential paths
+          mkdir -p /srv/mongo-shard-config/logs
+          mkdir -p /srv/mongo-shard-config/data
+          mkdir -p /etc/ssl/mongodb
+
+          #permissions
+          chown -R mongodb:mongodb /srv/mongo-shard-config/logs
+          chmod 755 /srv/mongo-shard-config/logs
+          chmod 755 /srv/mongo-shard-config/data
+
+  ConfigServer2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeConfig
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-CONFIG-2"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Config Server"
+          #config essential paths
+          mkdir -p /srv/mongo-shard-config/logs
+          mkdir -p /srv/mongo-shard-config/data
+          mkdir -p /etc/ssl/mongodb
+
+          #permissions
+          chown -R mongodb:mongodb /srv/mongo-shard-config/logs
+          chown -R mongodb:mongodb /srv/mongo-shard-config/data
+          chmod 755 /srv/mongo-shard-config/logs
+          chmod 755 /srv/mongo-shard-config/data
+
+  ConfigServer3:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeConfig
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-CONFIG-3"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Config Server"
+
+  # Shards - Each shard will have 3 nodes (1 primary and 2 secondaries)
+  Shard1Primary:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICA-1.0"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard1Secondary1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-1.1"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard1Secondary2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-1.2"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard2Primary:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-2.0"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard2Secondary1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-2.1"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard2Secondary2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-2.2"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard3Primary:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-3.0"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard3Secondary1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-3.1"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+  Shard3Secondary2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeShard
+      IamInstanceProfile: !Ref IamRole
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
+      SecurityGroupIds:
+      - !Ref SecurityGroupID
+      BlockDeviceMappings:
+
+      - DeviceName: /dev/sdf
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "1000"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      - DeviceName: /dev/sdg
+        Ebs:
+          VolumeType: "gp3"
+          VolumeSize: "80"
+          DeleteOnTermination: "true"
+          Encrypted: True
+          KmsKeyId: !Ref "EBSkey"
+      Tags:
+      - Key: Name
+        Value: "EC2-PRD-UW2-MONGODB-REPLICAS-3.2"
+      - Key: Environment
+        Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Configuring Shard Node"
+          sudo -i
+
+          # Create mount points
+          mkdir -p /mnt/mongodb-data/journal
+          mkdir -p /mnt/mongodb-data/data
+          mkdir -p /var/log/mongodb
+          mkdir -p /etc/ssl/mongodb/
+
+          # Format disks (only if they are new and not pre-formatted)
+          if ! lsblk -f | grep -q /dev/nvme1n1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+          if ! lsblk -f | grep -q /dev/nvme2n1 ; then
+            mkfs.ext4 /dev/nvme2n1
+          fi
+
+          # Mount the disks
+          mount /dev/nvme2n1 /mnt/mongodb-data/journal
+          mount /dev/nvme1n1 /mnt/mongodb-data/data
+
+          # Set correct ownership and permissions
+          chown -R mongodb:mongodb /mnt/mongodb-data
+          chown -R mongodb:mongodb /var/log/mongodb
+          chown -R mongodb:mongodb /etc/ssl/mongodb/
+          chmod 755 /mnt/mongodb-data/data
+          chmod 755 /mnt/mongodb-data/journal
+          chmod 755 /var/log/mongodb
+
+
+          # Persist mounts in /etc/fstab
+          echo "/dev/nvme2n1 /mnt/mongodb-data/journal ext4 defaults,noatime 0 0" >> /etc/fstab
+          echo "/dev/nvme1n1 /mnt/mongodb-data/data ext4 defaults,noatime 0 0" >> /etc/fstab
+
+          if [ ! -f /var/log/first_boot_done ]; then
+            sudo reboot
+          fi
+
+Outputs:
+  MongoRouterPrivateIp:
+    Description: Mongo Router Private IP
+    Value: !GetAtt MongoRouter.PrivateIp
+    Export:
+      Name: MongoRouter-PrivateIP
+
+  ConfigServerPrivateIps:
+    Description: Config Servers Private IPs
+    Value: !Sub "${ConfigServer1.PrivateIp}, ${ConfigServer2.PrivateIp}, ${ConfigServer3.PrivateIp}"
+    Export:
+      Name: ConfigServers-PrivateIPs
+
+  ShardPrivateIps:
+    Description: Shards Private IPs
+    Value: !Sub "${Shard1Primary.PrivateIp}, ${Shard2Primary.PrivateIp}, ${Shard3Primary.PrivateIp}"
+    Export:
+      Name: Shards-PrivateIPs
